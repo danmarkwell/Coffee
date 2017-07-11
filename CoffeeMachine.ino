@@ -4,7 +4,7 @@
 //http://playground.arduino.cc/Learning/SerialLCD
 
 /*
- * Need to incorporate m-f and ss schedules
+ * incorporate auto shutoff into menu, ability to turn on and off and change time
  * 
  */
 
@@ -24,54 +24,83 @@ LiquidCrystal_I2C lcd(0x3F, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
 RTC_DS3231 RTC;// define the Real Time Clock object; SDA to analog 4,  SCL to analog 5
 
 
-// Button and Pin Declaration
+// ------------Button and Pin Declaration------------
 
 
-const int GRIND_L_UP =8;
-const int GRIND_L_DOWN =9;
-const int GRIND_R_UP =10;
-const int GRIND_R_DOWN =11;
 
-//left and right switches on the grinder
-const int GRIND_L =12;
-const int GRIND_R =13;
+//-------------BUTTON PANEL----------
+const int Menu=4; // BROWN - SWITCH TO ACCESS/EXIT THE MENU
+const int TIMER_SWITCH =5; //WHITE/BROWN - switch to turn the timer function on and off
+const int GRIND_L_UP =6; //BLUE
+const int GRIND_L_DOWN =7;//WHITE/BLUE
+const int GRIND_R_UP =8;//GREEN
+const int GRIND_R_DOWN =9;//WHITE/GREEN
 
-//relay for the coffee machine.
-const int Relay =A1; 
+//-----------------------------------
 
-//switch to turn the timer function on and off
-const int TIMER_SWITCH =6;
+
+
+
+//----------COFFEE MACHINE-----------
 
 //switch to turn the coffee machine on and off
-const int COFFEE_ON =7;
+const int COFFEE_ON =3;//BLUE
+
+//relay for the coffee machine.
+const int Relay =A1; //BROWN - HIGH LEVEL TRIGGER
+
+// WHITE/BLUE AND WHITE/BROWN UN-USED
+
+//-----------------------------------
+
+
+//------------GRINDER----------------
+
+//left and right switches on the grinder
+const int GRIND_L =11;//GREEN
+const int GRIND_R =12;//WHITE/GREEN
 
 //relay for the grinder
-const int Relay2 =A2;
+const int Relay2 =A2; //BROWN - LOW LEVEL TRIGGER
 
-const int Menu=A0;
+//WHITE/BROWN UN-USED
+
+//-----------------------------------
+
+
+//---------------I2C-----------------
+// SCL -- GREEN
+//SDA -- WHITE/GREEN
+//-----------------------------------
+
+
+// ORANGE -- +5V
+// WHITE/ORANGE -- GROUND
 
 
 
-//  Global variable declaration
+//-------------Global variable declaration-------------------
 
-int set_onHH = 8;        //The default "ON"  desired hour
-int set_onMM = 0;   //The default "ON" desired minute
-int set_offHH = 9;
-int set_offMM = 30;
-int set_onwHH = 9;
-int set_onwMM = 0;
-int set_offwHH = 0;
-int set_offwMM = 0;
-
-int set_L = 15;          //The default Left grind time
+int set_onHH = 8;    //The default "ON" hour
+int set_onMM = 0;    //The default "ON" minute
+int set_offHH = 9;   //The default "OFF" hour
+int set_offMM = 30;  //The default "OFF" minute
+int set_onwHH = 9;   //The default WEEKEND "ON" hour
+int set_onwMM = 0;   //The default WEEKEND "ON" minute
+int set_offwHH = 12; //The default WEEKEND "OFF" hour
+int set_offwMM = 0;  //The default WEEKEND "OFF" minute
+int sleepTime = 22;  // The default auto-off time - prevents machine being left on overnight
+int set_L = 14;          //The default Left grind time
 int set_R = 0;           //The default Right grind time
 boolean light = HIGH;
-boolean Timer=HIGH;
+boolean Timer=LOW;
 unsigned long grindRunL;
 unsigned long grindRunR;
 boolean sleep=HIGH;
 boolean daylight = LOW;
 boolean lastdaylight;
+boolean notify = LOW;
+int flash=0;
 
 
 
@@ -104,23 +133,29 @@ char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursd
 
 
 void setup(){
+  
+   Wire.begin();
+   RTC.begin();   
+   Serial.begin(57600);
 
+   pinMode(Relay, OUTPUT);  //COFFEE MACHINE
+   pinMode(Relay2, OUTPUT); //GRINDER
 
-   pinMode(Relay, OUTPUT);
-   pinMode(Relay2, OUTPUT);
+   //------ INITIALIZING BOTH RELAYS IN THE OFF POSITION ------
 
-   //sets both relays to the OFF position at the beginning
-   digitalWrite(Relay, HIGH);
+   //COFFEE RELAY - HIGH LEVEL TRIGGER
+   digitalWrite(Relay, LOW);
+
+   //GRINDER RELAY - LOW LEVEL TRIGGER
    digitalWrite(Relay2, HIGH);
    
-    Wire.begin();
-    RTC.begin();   
-    Serial.begin(57600);
-     
-    // initializing the LCD
+    //------ INITIALIZING THE LCD ------
     lcd.begin(20, 4);
-    vari();
-//RTC.adjust(DateTime(2017,4,3,20,49,0));  
+    vari(); // program to initialize the display
+
+    
+    // ------ TIME ADJUSTMENT - UNCOMMENT IF NECESSARY ------
+    //RTC.adjust(DateTime(2017,4,3,20,49,0));  
  
 }
 
@@ -131,12 +166,10 @@ void loop(){
     
 //--------Show current Time On LCD--------//
 
+    DateTime now = RTC.now(); // Clock call
+    now = RTC.now();
 
-
-DateTime now = RTC.now(); // Clock call
-now = RTC.now();
-
-clockup();
+    clockup();  //program to print the time to the screen 
 
 
   //----Debounce  buttons---//
@@ -152,42 +185,68 @@ currentGrinderR = debounce(lastGrinderR, GRIND_R);
 currentMenu = debounce(lastMenu, Menu);
 
 
-// Auto shutoff for the coffee machine to turn off at 22h
+if (notify==HIGH){
 
+light=LOW;
 
-if(sleep!=0){
-   if(now.hour() >=22) 
-   digitalWrite(Relay, HIGH);
-   sleep=0;
+if(flash ==1){
+ lcd.backlight(); 
 }
 
-if(now.hour() >= 0 && now.hour() <22 ){
-  sleep=1;
+if(flash==100){
+  lcd.noBacklight();
 }
+
+if (flash==200){
+lcd.noBacklight();
+flash=0;
+}
+
+ flash ++; 
+}
+
+
+// Auto shutoff for the coffee machine to turn off at 22h //
 
  
 
+if(sleep!=0){
+   if(now.hour() >=sleepTime) 
+   {digitalWrite(Relay, LOW);
+   sleep=0;
+   }
+}
+
+if(now.hour() >= 0 && now.hour() <sleepTime ){
+  sleep=1;
+}
+
+
+
 //****Backlight off from 22h-6h*********
 
-  if (light==LOW){
-  lcd.noBacklight();
-  }
-  else {
-    light=HIGH;
-    lcd.backlight();
-  }
+
   
+
  if (now.hour()>=22 or now.hour()<=6){
   light=LOW;
  }
  else{
   light=HIGH;
  }
+ 
+ if (light==LOW){
+  lcd.noBacklight();
+  }
+ else if (light==HIGH && notify==LOW){
+    lcd.backlight();
+  }
+  
 
 
 
+//------ TIMER ON/OFF ------//
 
-//---timer on off---//
 
 
 if(lastTimerSwitch ==LOW && currentTimerSwitch ==HIGH){
@@ -207,18 +266,19 @@ lastTimerSwitch = currentTimerSwitch;
 
 if(Timer==LOW){
     lcd.setCursor(1,1);
-    lcd.print(" COFFEE TIMER OFF ");
+    lcd.print(" COFFEE TIMER OFF  ");
   }
 
 
 
-if(Timer==HIGH && digitalRead(Relay2)==HIGH){
+if(Timer==HIGH && digitalRead(Relay)==LOW){
 //  Printing the timer on time
 
 lcd.setCursor(1,1);
 lcd.print("COFFEE ON AT ");
 
-if(now.dayOfTheWeek()==0 or now.dayOfTheWeek()==6){
+
+if(now.dayOfTheWeek()==6){
   
 
 if(set_onwHH<10){
@@ -233,8 +293,89 @@ lcd.print("0");
 }
 
 lcd.print(set_onwMM);
+lcd.print(" ");
 
 }
+
+else if(now.dayOfTheWeek()==0) {
+
+  if(now.hour() >= set_onwHH && now.minute() > set_onwMM){
+  
+if(set_onHH<10){
+lcd.print("0");
+}
+
+lcd.print(set_onHH);
+lcd.print(":");
+
+if(set_onMM<10){
+lcd.print("0");
+}
+
+lcd.print(set_onMM);
+lcd.print(" ");
+ }
+
+else {
+  
+if(set_onwHH<10){
+lcd.print("0");
+}
+
+lcd.print(set_onwHH);
+lcd.print(":");
+
+if(set_onwMM<10){
+lcd.print("0");
+}
+
+lcd.print(set_onwMM);
+lcd.print(" ");
+  
+}
+}
+
+
+  
+else if(now.dayOfTheWeek()==5) {
+
+if(now.hour() >= set_onHH && now.minute() > set_onMM){
+  
+if(set_onwHH<10){
+lcd.print("0");
+}
+
+lcd.print(set_onwHH);
+lcd.print(":");
+
+if(set_onwMM<10){
+lcd.print("0");
+}
+
+lcd.print(set_onwMM);
+lcd.print(" ");
+
+}
+
+else{
+if(set_onHH<10){
+lcd.print("0");
+}
+
+lcd.print(set_onHH);
+lcd.print(":");
+
+if(set_onMM<10){
+lcd.print("0");
+}
+
+lcd.print(set_onMM);
+lcd.print(" ");
+}
+
+}
+  
+  
 
 else {
   
@@ -250,12 +391,13 @@ lcd.print("0");
 }
 
 lcd.print(set_onMM);
+lcd.print(" ");
   
 }
 }
 
 
-if(Timer==HIGH && digitalRead(Relay2)==LOW){
+if(Timer==HIGH && digitalRead(Relay)==HIGH){
 //  Printing the timer off time
 
 lcd.setCursor(1,1);
@@ -263,6 +405,7 @@ lcd.print("COFFEE OFF AT ");
 
 if(now.dayOfTheWeek()==0 or now.dayOfTheWeek()==6){
   
+if(now.hour() <= set_offwHH && now.minute() < set_offwMM){
 
 if(set_offwHH<10){
 lcd.print("0");
@@ -279,7 +422,23 @@ lcd.print(set_offwMM);
 
 }
 
+else{
+  
+if(sleepTime<10){
+lcd.print("0");
+}
+
+lcd.print(sleepTime);
+lcd.print(":00");
+
+}
+
+
+}
+
 else {
+
+if(now.hour() <= set_offHH && now.minute() < set_offMM){
   
 if(set_offHH<10){
 lcd.print("0");
@@ -293,51 +452,96 @@ lcd.print("0");
 }
 
 lcd.print(set_offMM);
+}
+
+else{
+  
+if(sleepTime<10){
+lcd.print("0");
+}
+
+lcd.print(sleepTime);
+lcd.print(":00");
+
+}
   
 }
 
+}
 
+  //--------- Timer function-------//
   
-  //-------Checking the current time against the set time-------
       
+   //---ON WEEKEND TIMER -------//
+
+ if(Timer==HIGH){  
+if(now.dayOfTheWeek()==0 or now.dayOfTheWeek()==6){
+
+      if(now.hour() == set_onwHH){
+      
+             //if current hour matches then the minute is checked                
+                      
+                    if (now.minute() == set_onwMM ){
+                                    
+                         digitalWrite(Relay, HIGH);  
+                     }
+      }  
+   // ------ OFF WEEKEND TIMER ------//
+
+      if(now.hour() == set_offwHH){
+        
+               if (now.minute() == set_offwMM ){
+                              
+                   digitalWrite(Relay, LOW);  
+               }
+      }
+}
+  
+// ------ WEEKDAY TIMER ------//    
+else {    
+
+    //------ ON TIMER------//
+    
     if(now.hour() == set_onHH){
 
        //if current hour matches then the minute is checked                
               
               if (now.minute() == set_onMM ){
                               
-                   digitalWrite(Relay, LOW);  
-       }
-       
+                   digitalWrite(Relay, HIGH);  
+              }
+    }
+    // ------ OFF TIMER ------//
+     
     if(now.hour() == set_offHH){
 
        //if current hour matches then the minute is checked                
               
               if (now.minute() == set_offMM ){
                               
-                   digitalWrite(Relay, HIGH);  
-       }
-
-
-
-}
+                   digitalWrite(Relay, LOW);  
+              }
 
     }
+}
+ }     
 
-//Coffee Machine Power Button Relay Control
+// ------ Coffee Machine Power Button Relay Control ------//
 
 if(lastCoffeeON ==LOW && currentCoffeeON ==HIGH){
   boolean state = digitalRead(Relay);
 
   if (state == LOW){
   digitalWrite(Relay, HIGH);
+  delay(150);
   }
 
   else if (state == HIGH){
     digitalWrite(Relay, LOW);
+    delay(150);
   }
   else{
-    digitalWrite(Relay, HIGH);
+    digitalWrite(Relay, LOW);
   }
 }
 lastCoffeeON = currentCoffeeON;
@@ -351,7 +555,7 @@ lastCoffeeON = currentCoffeeON;
  */ 
 
 
-//-----Turn down the left grind time
+// ------- Turn down the left grind time ------ //
 
 if (lastGrinderLdown== LOW && currentGrinderLdown == HIGH)
 {
@@ -369,7 +573,7 @@ if (lastGrinderLdown== LOW && currentGrinderLdown == HIGH)
 
 
 
-//----Turn up the left grind time
+// ------ Turn up the left grind time ------ //
 if (lastGrinderLup== LOW && currentGrinderLup == HIGH)
 {
  
@@ -401,7 +605,9 @@ else if (set_L==0){
   lcd.print("ON");
 }
 
-//-----Turn down the right grind time
+
+//-----Turn down the right grind time-----//
+
 if (lastGrinderRdown== LOW && currentGrinderRdown == HIGH)
 {
 
@@ -417,7 +623,8 @@ if (lastGrinderRdown== LOW && currentGrinderRdown == HIGH)
 
 
 
-//----Turn up the right grind time
+//----Turn up the right grind time-----//
+
 if (lastGrinderRup== LOW && currentGrinderRup == HIGH)
 {
       if(set_R<99){  
@@ -447,7 +654,7 @@ else if (set_R==0){
 }
 
 
-// code that executes upon the press of the left grinder button
+//---- code that executes upon the press of the left grinder button ---- //
 
 
 if (lastGrinderL==LOW && currentGrinderL==HIGH)
@@ -460,29 +667,25 @@ if (lastGrinderL==LOW && currentGrinderL==HIGH)
               grindRunL =sec();
               
           }
-      
-        else {
+
+            else {
               digitalWrite(Relay2, HIGH);
-              lcd.setCursor(0,2);
-              lcd.print("  YOU SILLY GOOSE");
               grindRunL =0;
-              delay(3000);
-              lcd.setCursor(0,2);
-              lcd.print("      GRINDER       ");
           }
+
           }
       
       
       else if(set_L==0){
           digitalWrite(Relay2, LOW);
-          delay(75);
+          delay(60);
           grindRunL =0;
       } 
 }
 
 if(lastGrinderL==HIGH && currentGrinderL==HIGH && set_L==0){
   digitalWrite(Relay2, LOW);
-  delay(75);
+  delay(60);
 }
 
 if(lastGrinderL==HIGH && currentGrinderL==LOW && set_L==0 ){
@@ -493,10 +696,8 @@ lastGrinderL=currentGrinderL;
 
 
 
-  
 
-
-// code that executes upon the press of the right grinder button
+// ---- code that executes upon the press of the right grinder button ---- //
 
 
 if (lastGrinderR==LOW && currentGrinderR==HIGH)
@@ -519,14 +720,14 @@ if (lastGrinderR==LOW && currentGrinderR==HIGH)
       
       else if(set_R==0){
           digitalWrite(Relay2, LOW);
-          delay(75);
+          delay(60);
           grindRunR =0;
       } 
 }
 
 if(lastGrinderR==HIGH && currentGrinderR==HIGH && set_R==0){
   digitalWrite(Relay2, LOW);
-  delay(75);
+  delay(60);
 }
 
 if(lastGrinderR==HIGH && currentGrinderR==LOW && set_R==0 ){
@@ -567,73 +768,37 @@ if((sec()-grindRunR)>=(set_R)){
 
 
 if(lastMenu ==LOW && currentMenu ==HIGH){
-stars();
+menu();
 }
 
 lastMenu = currentMenu;
 
 //lcd.setCursor(0,3);
 //lcd.print(daysOfTheWeek[now.dayOfTheWeek()]);
+
+
 }
 
-}
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-void stars(){
+void menu(){
   
   lcd.clear();
+  
   vari2();
 
   delay(300);
 
   int menu=1;
   int select=1;
-  int flash=0;
+  
   lastdaylight=daylight;
 
 
-    RTC.begin(); 
-    DateTime now = RTC.now(); // Clock call
-    now = RTC.now();
-
-    lcd.setCursor(10,2);
-
-if(now.hour() < 10)
-{
-lcd.print("0");
-}
-lcd.print(now.hour(), DEC); //Print hour
-lcd.print(':');
-
-if(now.minute() < 10)
-{
-lcd.print("0");
-}
-lcd.print(now.minute(), DEC);
   
-  while( menu==1 ){
+while( menu==1 ){
     
-
-//****** debouncing buttons*********
-
-
-
 
 while(select==1){
 
@@ -648,7 +813,7 @@ currentMenu = debounce(lastMenu, Menu);
   
   if(flash<=60){
     
-        lcd.setCursor(4,0);
+        lcd.setCursor(4,1);
         
         if(set_onHH<10){
           
@@ -658,7 +823,7 @@ currentMenu = debounce(lastMenu, Menu);
 
        lcd.print(set_onHH);
        lcd.print(":");
-       lcd.setCursor(7,0);
+       lcd.setCursor(7,1);
 
       if(set_onMM<10){
         
@@ -670,16 +835,16 @@ currentMenu = debounce(lastMenu, Menu);
 
   
   
-  if(flash> 60&& flash<100){
+  if(flash==60){
     
-      lcd.setCursor(4,0);
+      lcd.setCursor(4,1);
       lcd.print("     ");
       
   }
   
-  if(flash==100){
+  if(flash==3200){
     
-      lcd.setCursor(4,0);
+      lcd.setCursor(4,1);
       lcd.print("   ");
       flash=0;
   }
@@ -758,7 +923,7 @@ lastGrinderRup = currentGrinderRup;
         if (lastTimerSwitch== LOW && currentTimerSwitch == HIGH)
         {
 
-             lcd.setCursor(4,0);
+             lcd.setCursor(4,1);
                     
                     if(set_onHH<10){
                       
@@ -768,7 +933,7 @@ lastGrinderRup = currentGrinderRup;
             
                    lcd.print(set_onHH);
                    lcd.print(":");
-                   lcd.setCursor(7,0);
+                   lcd.setCursor(7,1);
             
                   if(set_onMM<10){
                     
@@ -796,7 +961,7 @@ lastTimerSwitch=currentTimerSwitch;
     {
         lcd.clear();
         select=0;
-        flash=200;
+        flash=0;
         vari();
         menu++;     
     }
@@ -823,7 +988,7 @@ currentMenu = debounce(lastMenu, Menu);
   
   if(flash<=60){
     
-         lcd.setCursor(14,0);
+         lcd.setCursor(14,1);
          
          if(set_offHH<10){
             lcd.print("0");
@@ -842,17 +1007,17 @@ currentMenu = debounce(lastMenu, Menu);
 
 
 
-    if(flash> 60 && flash<100){
+    if(flash==60){
       
-          lcd.setCursor(14,0);
+          lcd.setCursor(14,1);
           lcd.print("     ");
     
     }
 
     
-  if(flash==100){
+  if(flash==3200){
     
-        lcd.setCursor(14,0);
+        lcd.setCursor(14,1);
         lcd.print("     ");
         flash=0;
   }
@@ -941,7 +1106,7 @@ lastGrinderRup = currentGrinderRup;
 
 if (lastTimerSwitch== LOW && currentTimerSwitch == HIGH)
 {
-    lcd.setCursor(14,0);
+    lcd.setCursor(14,1);
          
       if(set_offHH<10){
             lcd.print("0");
@@ -968,7 +1133,7 @@ if (lastMenu== LOW && currentMenu == HIGH)
 {
     lcd.clear();
    select=0;
-   flash=200;
+   flash=0;
     vari();
    menu++;   
      
@@ -992,7 +1157,7 @@ currentMenu = debounce(lastMenu, Menu);
   
   if(flash<=60){
     
-        lcd.setCursor(4,1);
+        lcd.setCursor(4,3);
         
         if(set_onwHH<10){
           
@@ -1002,7 +1167,7 @@ currentMenu = debounce(lastMenu, Menu);
 
        lcd.print(set_onwHH);
        lcd.print(":");
-       lcd.setCursor(7,1);
+       lcd.setCursor(7,3);
 
       if(set_onwMM<10){
         
@@ -1014,16 +1179,16 @@ currentMenu = debounce(lastMenu, Menu);
 
   
   
-  if(flash> 60 && flash<100){
+  if(flash==60){
     
-      lcd.setCursor(4,1);
+      lcd.setCursor(4,3);
       lcd.print("     ");
       
   }
   
-  if(flash==100){
+  if(flash==3200){
     
-      lcd.setCursor(4,1);
+      lcd.setCursor(4,3);
       lcd.print("   ");
       flash=0;
   }
@@ -1104,7 +1269,7 @@ lastGrinderRup = currentGrinderRup;
         if (lastTimerSwitch== LOW && currentTimerSwitch == HIGH)
         {
 
-             lcd.setCursor(4,1);
+             lcd.setCursor(4,3);
                     
                     if(set_onwHH<10){
                       
@@ -1114,7 +1279,7 @@ lastGrinderRup = currentGrinderRup;
             
                    lcd.print(set_onwHH);
                    lcd.print(":");
-                   lcd.setCursor(7,1);
+                   lcd.setCursor(7,3);
             
                   if(set_onwMM<10){
                     
@@ -1142,7 +1307,7 @@ lastTimerSwitch=currentTimerSwitch;
     {
         lcd.clear();
         select=0;
-        flash=200;
+        flash=0;
         vari();
         menu++;     
     }
@@ -1158,6 +1323,7 @@ lastMenu=currentMenu;
 
 while(select==4){
 
+
  
 currentTimerSwitch = debounce(lastTimerSwitch, TIMER_SWITCH);
 currentGrinderLup = debounce(lastGrinderLup, GRIND_L_UP);
@@ -1169,7 +1335,7 @@ currentMenu = debounce(lastMenu, Menu);
   
   if(flash<=60){
     
-         lcd.setCursor(14,1);
+         lcd.setCursor(14,3);
          
          if(set_offwHH<10){
             lcd.print("0");
@@ -1188,17 +1354,17 @@ currentMenu = debounce(lastMenu, Menu);
 
 
 
-    if(flash> 60 && flash<100){
+    if(flash==60){
       
-          lcd.setCursor(14,1);
+          lcd.setCursor(14,3);
           lcd.print("     ");
     
     }
 
     
-  if(flash==100){
+  if(flash==3200){
     
-        lcd.setCursor(14,1);
+        lcd.setCursor(14,3);
         lcd.print("     ");
         flash=0;
   }
@@ -1214,7 +1380,7 @@ flash++;
      
          if(set_offwHH>0){    
           
-             set_onwHH--; 
+             set_offwHH--; 
                     
             }
             
@@ -1287,7 +1453,7 @@ lastGrinderRup = currentGrinderRup;
 
 if (lastTimerSwitch== LOW && currentTimerSwitch == HIGH)
 {
-    lcd.setCursor(14,1);
+    lcd.setCursor(14,3);
          
       if(set_offwHH<10){
             lcd.print("0");
@@ -1301,7 +1467,9 @@ if (lastTimerSwitch== LOW && currentTimerSwitch == HIGH)
           }
       
     lcd.print(set_offwMM);
-   flash=0;       
+   flash=0; 
+   lcd.clear();   
+   vari3();   
    select++;    
 }
 
@@ -1314,7 +1482,7 @@ if (lastMenu== LOW && currentMenu == HIGH)
 {
     lcd.clear();
    select=0;
-   flash=200;
+   flash=0;
     vari();
    menu++;   
      
@@ -1325,10 +1493,417 @@ lastMenu=currentMenu;
 }
 
 
+//----Setting the Day----//
+
+while(select==5){
+
+  DateTime now = RTC.now(); // Clock call
+  now = RTC.now();
+  
+        currentTimerSwitch = debounce(lastTimerSwitch, TIMER_SWITCH);
+        currentGrinderLup = debounce(lastGrinderLup, GRIND_L_UP);
+        currentGrinderLdown = debounce(lastGrinderLdown, GRIND_L_DOWN);
+        currentGrinderRup = debounce(lastGrinderRup, GRIND_R_UP);
+        currentGrinderRdown = debounce(lastGrinderRdown, GRIND_R_DOWN);
+        currentMenu = debounce(lastMenu, Menu);
+
+
+  
+  if(flash<= 60){
+    
+   lcd.setCursor(10,1);
+   
+      if (now.day()<10){
+        
+      lcd.print("0");
+      }
+      
+  lcd.print(now.day());
+ 
+  }
+  
+  if(flash==100){
+    
+  lcd.setCursor(10,1);
+  lcd.print("  ");
+  
+  }
+  
+  if(flash==800){
+  lcd.setCursor(10,1);
+  lcd.print("  ");
+  flash=0;
+  }
+  
+flash++;
+
+
+if (lastGrinderRdown== LOW && currentGrinderRdown == HIGH){
+
+int dy=now.day();
+int mn=now.month();
+int yr=now.year();
+
+if (mn==6 || mn==9 || mn==11 || mn==4){
+
+if(dy > 1){
+  dy--;
+}
+
+else if(dy == 1){
+  dy=30;
+}
+  
+}
+
+else if (mn==2){
+
+  if(dy > 1){
+  dy--;
+}
+
+else if(dy == 1){
+  dy=28;
+}
+  
+}
+
+else if(mn==1 || mn==3 || mn==5 || mn==7 || mn==8 || mn==10 || mn==12){
+
+
+  if(dy > 1){
+  dy--;
+}
+
+else if(dy == 1){
+  dy=31;
+}
+
+}
+
+dateadj(dy,mn,yr);
+
+
+}
+
+
+
+if (lastGrinderRup== LOW && currentGrinderRup == HIGH){
+
+
+int dy=now.day();
+int mn=now.month();
+int yr=now.year();
+
+if (mn==6 || mn==9 || mn==11 || mn==4){
+
+if (dy<30){
+  dy++;
+ 
+}
+
+else if(dy==30){
+  dy=1;
+}
+  
+}
+
+else if (mn==2){
+
+  if(dy<28){
+    dy=28;
+  }
+
+  else if(dy==28){
+    dy=1;
+  }
+  
+}
+
+else if(mn==1 || mn==3 || mn==5 || mn==7 || mn==8 || mn==10 || mn==12){
+
+if(dy<31){
+  dy++;
+}
+else if(dy==31){
+  dy==1;
+}
+  
+}
+
+dateadj(dy,mn,yr);
+
+}
+
+lastGrinderRdown = currentGrinderRdown;
+lastGrinderRup = currentGrinderRup; 
+
+
+if (lastTimerSwitch== LOW && currentTimerSwitch == HIGH)
+{
+     lcd.setCursor(10,1);
+   
+      if (now.day()<10){
+        
+      lcd.print("0");
+      }
+      
+  lcd.print(now.day());
+    flash=0;      
+   select++;    
+}
+
+lastTimerSwitch=currentTimerSwitch;
+
+//************** Button to exit the menu ***************************
+
+
+if (lastMenu== LOW && currentMenu == HIGH)
+{
+   lcd.clear();
+   select=0;
+   flash=0;
+    vari();
+    
+
+   menu++;    
+}
+
+lastMenu=currentMenu;
+
+
+}
+
+
+
+
+//----Setting the Month------//
+while(select==6){
+
+DateTime now = RTC.now(); // Clock call
+now = RTC.now();
+  
+      currentTimerSwitch = debounce(lastTimerSwitch, TIMER_SWITCH);
+      currentGrinderLup = debounce(lastGrinderLup, GRIND_L_UP);
+      currentGrinderLdown = debounce(lastGrinderLdown, GRIND_L_DOWN);
+      currentGrinderRup = debounce(lastGrinderRup, GRIND_R_UP);
+      currentGrinderRdown = debounce(lastGrinderRdown, GRIND_R_DOWN);
+      currentMenu = debounce(lastMenu, Menu);
+
+
+
+
+  
+  if(flash<= 60){
+    
+    lcd.setCursor(13,1);
+    
+    if (now.month()<10){
+  lcd.print("0");
+}
+  lcd.print(now.month());
+ 
+  }
+  
+  if(flash==100){
+    
+  lcd.setCursor(13,1);
+  lcd.print("  ");
+  
+  }
+  
+  if(flash==800){
+  lcd.setCursor(13,1);
+  lcd.print("  ");
+  flash=0;
+  }
+  
+flash++;
+
+if (lastGrinderRdown== LOW && currentGrinderRdown == HIGH){
+
+int dy=now.day();
+int mn=now.month();
+int yr=now.year();
+
+if(mn>1){
+  mn--;
+}
+else if(mn==1){
+  mn=12;
+}
+
+
+ dateadj(dy,mn,yr); 
+
+
+}
+if (lastGrinderRup== LOW && currentGrinderRup == HIGH){
+
+int dy=now.day();
+int mn=now.month();
+int yr=now.year();
+
+if(mn<12){
+  mn++;
+}
+
+else if(mn==12){
+  mn=1;
+}
+
+ dateadj(dy,mn,yr); 
+
+}
+
+lastGrinderRdown = currentGrinderRdown;
+lastGrinderRup = currentGrinderRup; 
+
+
+if (lastTimerSwitch== LOW && currentTimerSwitch == HIGH)
+{
+    lcd.setCursor(13,1);
+    
+    if (now.month()<10){
+  lcd.print("0");
+}
+  lcd.print(now.month());
+    flash=0;      
+   select++;    
+}
+
+lastTimerSwitch=currentTimerSwitch;
+
+//************** Button to exit the menu ***************************
+
+
+if (lastMenu== LOW && currentMenu == HIGH)
+{
+   lcd.clear();
+   select=0;
+   flash=0;
+    vari();
+    
+
+   menu++;    
+}
+
+lastMenu=currentMenu;
+
+
+}
+
+
+
+
+//-----Setting the Year----//
+
+while(select==7){
+
+DateTime now = RTC.now(); // Clock call
+now = RTC.now();
+  
+        currentTimerSwitch = debounce(lastTimerSwitch, TIMER_SWITCH);
+        currentGrinderLup = debounce(lastGrinderLup, GRIND_L_UP);
+        currentGrinderLdown = debounce(lastGrinderLdown, GRIND_L_DOWN);
+        currentGrinderRup = debounce(lastGrinderRup, GRIND_R_UP);
+        currentGrinderRdown = debounce(lastGrinderRdown, GRIND_R_DOWN);
+        currentMenu = debounce(lastMenu, Menu);
+
+
+
+
+  
+  if(flash<= 60){
+    
+    lcd.setCursor(16,1);
+    lcd.print(now.year());
+  }
+  
+  if(flash==100){
+    
+  lcd.setCursor(16,1);
+  lcd.print("    ");
+  
+  }
+  
+  if(flash==800){
+  lcd.setCursor(16,1);
+  lcd.print("    ");
+  flash=0;
+  }
+  
+flash++;
+
+
+
+if (lastGrinderRdown== LOW && currentGrinderRdown == HIGH){
+  
+int dy=now.day();
+int mn=now.month();
+int yr=now.year();
+
+yr --;
+
+dateadj(dy,mn,yr); 
+
+}
+if (lastGrinderRup== LOW && currentGrinderRup == HIGH){
+
+int dy=now.day();
+int mn=now.month();
+int yr=now.year();
+
+yr ++;
+
+dateadj(dy,mn,yr);
+  
+}
+
+lastGrinderRdown = currentGrinderRdown;
+lastGrinderRup = currentGrinderRup; 
+
+
+
+if (lastTimerSwitch== LOW && currentTimerSwitch == HIGH)
+{
+     lcd.setCursor(16,1);
+    lcd.print(now.year());
+    
+    flash=0;      
+   select++;    
+}
+
+lastTimerSwitch=currentTimerSwitch;
+
+
+
+
+//************** Button to exit the menu ***************************
+
+
+if (lastMenu== LOW && currentMenu == HIGH)
+{
+   lcd.clear();
+   select=0;
+   flash=0;
+    vari();
+    
+
+   menu++;    
+}
+
+lastMenu=currentMenu;
+
+}
+
 
 //******* Adjusting the clock**********
     
-while(select==5){
+while(select==8){
+
+
+  
 
   DateTime now = RTC.now(); // Clock call
 now = RTC.now();
@@ -1342,7 +1917,7 @@ currentMenu = debounce(lastMenu, Menu);
 
 
   
-  if(flash>=0){
+  if(flash<= 60){
     
     lcd.setCursor(10,2);
     
@@ -1361,14 +1936,14 @@ currentMenu = debounce(lastMenu, Menu);
  
   }
   
-  if(flash> 100 && flash<150){
+  if(flash==100){
     
   lcd.setCursor(10,2);
   lcd.print("     ");
   
   }
   
-  if(flash==150){
+  if(flash==160){
   lcd.setCursor(10,2);
   lcd.print("     ");
   flash=0;
@@ -1378,7 +1953,7 @@ flash++;
 
   
     
-//***************** setting the on weekday time ***********************
+//***************** setting the clock ***********************
   
 if (lastGrinderLdown== LOW && currentGrinderLdown == HIGH){
   
@@ -1469,7 +2044,6 @@ int hr=now.hour();
 }
 
 
-
 if (lastGrinderRup== LOW && currentGrinderRup == HIGH){
 
   int hr=now.hour();
@@ -1535,7 +2109,7 @@ if (lastMenu== LOW && currentMenu == HIGH)
 {
    lcd.clear();
    select=0;
-   flash=200;
+   flash=0;
     vari();
    menu++;     
 }
@@ -1544,7 +2118,7 @@ lastMenu=currentMenu;
 }
 
 
-while(select==6){
+while(select==9){
 
   DateTime now = RTC.now(); // Clock call
   now = RTC.now();
@@ -1681,6 +2255,8 @@ if(lastdaylight != daylight){
 
   }
    flash=0;
+   lcd.clear();
+   vari2();
    select=1;   
     
 }
@@ -1693,7 +2269,7 @@ if (lastMenu== LOW && currentMenu == HIGH)
 {
    lcd.clear();
    select=0;
-   flash=200;
+   flash=0;
     vari();
 
   int hr=now.hour();
@@ -1736,7 +2312,7 @@ if (lastMenu== LOW && currentMenu == HIGH)
 {
    lcd.clear();
    select=0;
-   flash=200;
+   flash=0;
     vari();
     
 
@@ -1769,8 +2345,13 @@ void vari(){
 }
 
 void vari2(){
-  lcd.setCursor(0,0);
-lcd.print("M-F:");
+lcd.setCursor(0,0);
+
+lcd.print("    MONDAY-FRIDAY   ");
+
+lcd.setCursor(1,1);
+lcd.print("ON:");
+
 if (set_onHH<10){
   lcd.print("0");
 }
@@ -1780,8 +2361,9 @@ if (set_onMM<10){
   lcd.print("0");
 }
 lcd.print(set_onMM);
-lcd.setCursor(10,0);
-lcd.print("OFF ");
+lcd.setCursor(10,1);
+
+lcd.print("OFF:");
 if (set_offHH<10){
   lcd.print("0");
 }
@@ -1791,8 +2373,14 @@ if (set_offMM<10){
   lcd.print("0");
 }
 lcd.print(set_offMM);
-lcd.setCursor(0,1);
-lcd.print("S-S:");
+
+lcd.setCursor(0,2);
+
+lcd.print("  SATURDAY-SUNDAY   ");
+
+lcd.setCursor(1,3);
+
+lcd.print("ON:");
 if (set_onwHH<10){
   lcd.print("0");
 }
@@ -1802,8 +2390,8 @@ if (set_onwMM<10){
   lcd.print("0");
 }
 lcd.print(set_onwMM);
-lcd.setCursor(10,1);
-lcd.print("OFF ");
+lcd.setCursor(10,3);
+lcd.print("OFF:");
 if (set_offwHH<10){
   lcd.print("0");
 }
@@ -1813,17 +2401,68 @@ if (set_offwMM<10){
   lcd.print("0");
 }
 lcd.print(set_offwMM);
-lcd.setCursor(0,2);
-lcd.print("TIME SET:");
-lcd.setCursor(0,3);
-lcd.print("DAYLIGHT SAVINGS:");
+
+
+
+}
+
+
+void vari3(){
+  
+   DateTime now = RTC.now(); // Clock call
+  now = RTC.now();
+
+  lcd.setCursor(0,0);
+  lcd.print("   Date and Time");
+  lcd.setCursor(0,1);
+ if(now.dayOfTheWeek() <= 2 || now.dayOfTheWeek()==5){
+  lcd.print("  ");
+ }
+
+ 
+  lcd.print(daysOfTheWeek[now.dayOfTheWeek()]);
+  lcd.setCursor(10,1);
+  if (now.day()<10){
+  lcd.print("0");
+}
+  lcd.print(now.day());
+  lcd.print("/");
+  if (now.month()<10){
+  lcd.print("0");
+}
+  lcd.print(now.month());
+  lcd.print("/");
+  lcd.print(now.year());
+  lcd.setCursor(0,2);
+  lcd.print("Set Time:");
+ lcd.setCursor(10,2);
+    
+    if(now.hour() < 10)
+    {
+    lcd.print("0");
+    }
+    lcd.print(now.hour(), DEC); //Print hour
+    lcd.print(':');
+    
+    if(now.minute() < 10)
+    {
+    lcd.print("0");
+    }
+    lcd.print(now.minute(), DEC);
+  lcd.setCursor(0,3);
+  lcd.print("Daylight Savings");
+  lcd.setCursor(17,3);
+
 if (daylight==LOW){
   lcd.print("OFF");
 
 }
-else if(daylight=HIGH){
+else if(daylight==HIGH){
   lcd.print(" ON");
 }
+ 
+  
+  
 }
 
 unsigned long sec(){
@@ -1840,6 +2479,16 @@ void clockadj(int hr, int mn){
     RTC.adjust(DateTime(now.year(),now.month(),now.day(),hr,mn,now.second()));
    
   }
+
+void dateadj(int dy, int mn, int yr){
+
+   RTC.begin(); 
+    DateTime now = RTC.now();
+    now = RTC.now();
+    RTC.adjust(DateTime(yr,mn,dy,now.hour(),now.minute(),now.second()));
+  
+}
+
 
 void clockup(){
   DateTime now = RTC.now(); // Clock call
