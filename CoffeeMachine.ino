@@ -1,17 +1,8 @@
 
-//https://arduino-info.wikispaces.com/LCD-Blue-I2C
-//https://www.sparkfun.com/tutorials/246
-//http://playground.arduino.cc/Learning/SerialLCD
-
 /*
- * incorporate auto shutoff into menu, ability to turn on and off and change time
- * 
- */
-
-/*
- * DMarkwell
+ * danmarkwell
  * Arduino Timer on/off and grinder timer control
- * arduino Nano + rtc ds3231 + 20x4 LCD + 9 buttons
+ * arduino Nano + rtc ds3231 + 20x4 LCD + 9 buttons + 2 relays
  */
  
 #include <LiquidCrystal_I2C.h>
